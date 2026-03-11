@@ -1,6 +1,8 @@
 'use client';
 
 import { useState } from 'react';
+import { useAuth } from 'react-oidc-context';
+import { useAppConfig } from '@/components/AuthProvider';
 import { db } from '@/lib/db';
 
 interface UploadFormProps {
@@ -8,6 +10,8 @@ interface UploadFormProps {
 }
 
 export default function UploadForm({ onSubmitSuccess }: UploadFormProps) {
+  const auth = useAuth();
+  const { basePath } = useAppConfig();
   const [files, setFiles] = useState<File[]>([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
@@ -32,7 +36,6 @@ export default function UploadForm({ onSubmitSuccess }: UploadFormProps) {
     setIsSubmitting(true);
     setMessage(null);
 
-    // Initialize progress tracking
     const initialProgress = files.map(file => ({
       fileName: file.name,
       status: 'pending' as const,
@@ -43,11 +46,9 @@ export default function UploadForm({ onSubmitSuccess }: UploadFormProps) {
     let errorCount = 0;
 
     try {
-      // Submit files sequentially to avoid overwhelming the server
       for (let i = 0; i < files.length; i++) {
         const file = files[i];
         
-        // Update status to uploading
         setProgress(prev => prev.map((p, idx) => 
           idx === i ? { ...p, status: 'uploading' } : p
         ));
@@ -56,8 +57,11 @@ export default function UploadForm({ onSubmitSuccess }: UploadFormProps) {
           const formData = new FormData();
           formData.append('file', file);
 
-          const response = await fetch('/api/n8n/submit', {
+          const response = await fetch(`${basePath}/api/n8n/submit`, {
             method: 'POST',
+            headers: {
+              Authorization: `Bearer ${auth.user?.access_token}`,
+            },
             body: formData,
           });
 
@@ -67,7 +71,6 @@ export default function UploadForm({ onSubmitSuccess }: UploadFormProps) {
             throw new Error(result.error || 'Failed to submit');
           }
 
-          // Save to IndexedDB
           await db.executions.add({
             executionId: result.executionId,
             fileName: result.fileName,
@@ -76,14 +79,12 @@ export default function UploadForm({ onSubmitSuccess }: UploadFormProps) {
             updatedAt: new Date(),
           });
 
-          // Update status to success
           setProgress(prev => prev.map((p, idx) => 
             idx === i ? { ...p, status: 'success', message: `Execution ID: ${result.executionId}` } : p
           ));
           
           successCount++;
         } catch (error) {
-          // Update status to error
           setProgress(prev => prev.map((p, idx) => 
             idx === i ? { 
               ...p, 
@@ -96,7 +97,6 @@ export default function UploadForm({ onSubmitSuccess }: UploadFormProps) {
         }
       }
 
-      // Show summary message
       if (errorCount === 0) {
         setMessage({ type: 'success', text: `All ${successCount} file(s) submitted successfully!` });
       } else if (successCount === 0) {
@@ -105,12 +105,10 @@ export default function UploadForm({ onSubmitSuccess }: UploadFormProps) {
         setMessage({ type: 'success', text: `Submitted ${successCount} file(s) successfully, ${errorCount} failed` });
       }
       
-      // Reset file input
       setFiles([]);
       const fileInput = document.getElementById('file-input') as HTMLInputElement;
       if (fileInput) fileInput.value = '';
 
-      // Notify parent component
       if (successCount > 0) {
         onSubmitSuccess?.();
       }
@@ -120,14 +118,14 @@ export default function UploadForm({ onSubmitSuccess }: UploadFormProps) {
   };
 
   return (
-    <div className="w-full max-w-2xl p-6 bg-white rounded-lg shadow-md border border-gray-200 dark:bg-zinc-900 dark:border-zinc-800">
-      <h2 className="text-2xl font-semibold mb-4 text-gray-900 dark:text-white">Submit Job to n8n</h2>
+    <div className="w-full p-6 rounded-lg shadow-sm border" style={{ background: 'var(--card-bg)', borderColor: 'var(--card-border)' }}>
+      <h2 className="text-lg font-semibold mb-4" style={{ color: 'var(--foreground)' }}>Submit Job to n8n</h2>
       
       <form onSubmit={handleSubmit} className="space-y-4">
         <div>
           <label 
             htmlFor="file-input" 
-            className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2"
+            className="block text-sm font-medium text-gray-700 mb-2"
           >
             Select Files
           </label>
@@ -137,16 +135,16 @@ export default function UploadForm({ onSubmitSuccess }: UploadFormProps) {
             multiple
             onChange={handleFileChange}
             disabled={isSubmitting}
-            className="block w-full text-sm text-gray-900 dark:text-gray-300 border border-gray-300 dark:border-zinc-700 rounded-lg cursor-pointer bg-gray-50 dark:bg-zinc-800 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed p-2"
+            className="block w-full text-sm text-gray-900 border border-gray-300 rounded-lg cursor-pointer bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed p-2"
           />
           {files.length > 0 && (
             <div className="mt-3 space-y-2">
-              <p className="text-sm font-medium text-gray-700 dark:text-gray-300">
+              <p className="text-sm font-medium text-gray-700">
                 Selected {files.length} file(s):
               </p>
               <ul className="space-y-1">
                 {files.map((file, index) => (
-                  <li key={index} className="text-sm text-gray-600 dark:text-gray-400 flex items-center gap-2">
+                  <li key={index} className="text-sm text-gray-600 flex items-center gap-2">
                     <span className="inline-block w-1.5 h-1.5 bg-blue-500 rounded-full"></span>
                     {file.name} ({(file.size / 1024).toFixed(2)} KB)
                   </li>
@@ -167,13 +165,13 @@ export default function UploadForm({ onSubmitSuccess }: UploadFormProps) {
 
       {progress.length > 0 && (
         <div className="mt-4 space-y-2">
-          <p className="text-sm font-medium text-gray-700 dark:text-gray-300">Upload Progress:</p>
+          <p className="text-sm font-medium text-gray-700">Upload Progress:</p>
           <ul className="space-y-2">
             {progress.map((item, index) => (
               <li key={index} className="flex items-start gap-2 text-sm">
                 <span className="mt-0.5">
                   {item.status === 'pending' && (
-                    <span className="inline-block w-4 h-4 border-2 border-gray-300 dark:border-gray-600 rounded-full"></span>
+                    <span className="inline-block w-4 h-4 border-2 border-gray-300 rounded-full"></span>
                   )}
                   {item.status === 'uploading' && (
                     <span className="inline-block w-4 h-4 border-2 border-blue-500 border-t-transparent rounded-full animate-spin"></span>
@@ -187,14 +185,14 @@ export default function UploadForm({ onSubmitSuccess }: UploadFormProps) {
                 </span>
                 <div className="flex-1">
                   <p className={`${
-                    item.status === 'success' ? 'text-green-700 dark:text-green-400' :
-                    item.status === 'error' ? 'text-red-700 dark:text-red-400' :
-                    'text-gray-700 dark:text-gray-300'
+                    item.status === 'success' ? 'text-green-700' :
+                    item.status === 'error' ? 'text-red-700' :
+                    'text-gray-700'
                   }`}>
                     {item.fileName}
                   </p>
                   {item.message && (
-                    <p className="text-xs text-gray-600 dark:text-gray-400 mt-0.5">{item.message}</p>
+                    <p className="text-xs text-gray-500 mt-0.5">{item.message}</p>
                   )}
                 </div>
               </li>
@@ -207,8 +205,8 @@ export default function UploadForm({ onSubmitSuccess }: UploadFormProps) {
         <div
           className={`mt-4 p-3 rounded-lg ${
             message.type === 'success'
-              ? 'bg-green-50 dark:bg-green-900/20 text-green-800 dark:text-green-300 border border-green-200 dark:border-green-800'
-              : 'bg-red-50 dark:bg-red-900/20 text-red-800 dark:text-red-300 border border-red-200 dark:border-red-800'
+              ? 'bg-green-50 text-green-800 border border-green-200'
+              : 'bg-red-50 text-red-800 border border-red-200'
           }`}
         >
           <p className="text-sm">{message.text}</p>
@@ -217,27 +215,3 @@ export default function UploadForm({ onSubmitSuccess }: UploadFormProps) {
     </div>
   );
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
